@@ -26,6 +26,8 @@ Y1 = lambda s: (s['out1'] == 'Y' and
 
 G2 = lambda s: (s['out1'] == 'R' and
                 s['out2'] == 'G' and (
+                    (s['clock'] >= 30 and s['walk'] and
+                        dict(s, clock=0, out2="Y", walk=False)) or
                     (s['clock'] < 60 and dict(s, clock=s['clock']+1)) or
                     (s['clock'] == 60) and dict(s, clock=0, out2="Y")
                   )   
@@ -40,6 +42,8 @@ Y2 = lambda s: (s['out1'] == 'R' and
 
 INVARIANTS = lambda s: not (s['out1'] in {'G','Y'} and s['out1'] == s['out2'])
 
+# State machines only run in response to events.  These functions take an
+# event and a state and return the next state (if there is one)
 TICK = lambda evt, s: evt == 'tick' and (G1(s) or Y1(s) or G2(s) or Y2(s))
 BUTTON = lambda evt, s: evt == 'button' and dict(s, walk=True)
 NEXT = lambda evt, s: TICK(evt, s) or BUTTON(evt, s)
@@ -61,8 +65,8 @@ def run():
             sys.stdin.readline()
             event_queue.put('button')
 
-    threading.Thread(target=run_timer).start()
-    threading.Thread(target=run_button).start()
+    threading.Thread(target=run_timer, daemon=True).start()
+    threading.Thread(target=run_button, daemon=True).start()
 
     state = INITIAL
     while True:
@@ -70,6 +74,28 @@ def run():
         evt = event_queue.get()
         state = NEXT(evt, state)
 
-run()
 
+def freeze(d):
+    return tuple(sorted(d.items()))
+
+def simulate():
+    from collections import deque
+    seen_states = set()
+    must_check = deque([INITIAL])   # Queue of pending states
+
+    while must_check:
+        state = must_check.popleft()    # Get a state
+        if freeze(state) in seen_states:
+            continue
+        seen_states.add(freeze(state))
+        num_pending = len(must_check)
+        for evt in ['tick', 'button']:   # ALL possible events
+            nextstate = NEXT(evt, state)
+            if nextstate:
+                must_check.append(nextstate)
+        if num_pending == len(must_check):
+            print("DEADLOCK in", state)
+
+    print("Checked", len(seen_states), "states")
+simulate() 
 
