@@ -33,11 +33,15 @@ class AppendEntriesResponse(RaftMessage):
     matchIndex = None   # Used in TLA+ spec.  For what???
 
 class RequestVote(RaftMessage):
-    term = None
-    candidateId = None
-    lastLogIndex = None
-    lastLogTerm = None
+    def __init__(self, source, dest, term, candidateId):
+        super().__init__(source, dest)
+        self.term = term
+        # self.candidateId = candidateId   # Not needed (probably)
+        # self.lastLogIndex = lastLogIndex
+        # self.lastLogTerm = lastLogTerm
 
 class RequestVoteResponse(RaftMessage):
-    term = None
-    voteGranted = None
+    def __init__(self, source, dest, term, voteGranted):
+        super().__init__(source, dest)
+        self.term = term
+        self.voteGranted = voteGranted
