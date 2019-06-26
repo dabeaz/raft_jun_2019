@@ -2,6 +2,8 @@
 #
 # The Raft state machine
 
+from .message import RequestVote
+
 class RaftMachine:
     def __init__(self, id, nservers, control):
         self.control = control
@@ -61,7 +63,8 @@ class Follower(RaftState):
         machine.votedFor = machine.id   # I vote for myself
         # Reset election timer????
         machine.control.reset_election_timer()
-        
+        machine.votesGranted = 1
+
         # Send a RequestVote to all other servers
         for i in range(machine.nservers):
             if i != machine.id:
@@ -86,12 +89,15 @@ class Leader(RaftState):
 class Candidate(RaftState):
     @staticmethod
     def handle_RequestVoteResponse(machine, msg):
-        # If quorum - 1 votes are for me, then leader
-        if quorum():
-            machine.state = Leader
-            ...
+        if msg.term < machine.term:   # Ignore (out of date message)
+            pass
+
+        if msg.voteGranted:
+            machine.votesGranted += 1
+            if machine.votesGranted > (machine.nservers // 2):
+                machine.state = Leader
         
-    @static
+    @staticmethod
     def handle_ElectionTimeout(machine):
         # Oh well. Call a new election for myself
         Follower.handle_ElectionTimeout(machine)
