@@ -2,8 +2,107 @@
 #
 # The Raft controller
 
+LEADER_TIMEOUT = 1
+ELECTION_TIMEOUT = 3
+ELECTION_TIMEOUT_SPREAD = 0.5
+
+import threading
+import queue
+import time
+from .machine import RaftMachine
+import random
+
 class RaftController:
-    pass
+    def __init__(self, addr, dispatcher, machine):
+        self.addr = addr
+        self.dispatcher = dispatcher
+        self.machine = machine
+        machine.control = self
+
+        self.peers = [ i for i in range(dispatcher.nservers) if i != addr ]
+        self.nservers = dispatcher.nservers
+        self.event_queue = queue.Queue()
+        self.running = False
+        self._paused = False
+
+        # Debug logging
+        self.debug_log = open(f'log-{addr}.txt', 'wt')
+
+    # Commands used by the machine
+    def send_message(self, msg):
+        msg.source = self.addr
+        self.debug_log.write(f'{self.addr}: send_message({msg})\n')
+        self.debug_log.flush()
+        self.dispatcher.send_message(msg)
+
+    # The main event loop
+    def start(self):
+        self.running = True
+        print(f"Starting server: {self.addr}")
+        threading.Thread(target=self.run, daemon=True).start()
+        threading.Thread(target=self.run_receiver, daemon=True).start()
+        threading.Thread(target=self.run_leader_timer, daemon=True).start()
+        threading.Thread(target=self.run_election_timer, daemon=True).start()
+
+    def run(self):
+        while self.running:
+            evt, *args = self.event_queue.get()
+            if not self._paused:
+                self.debug_log.write(f'{self.addr}: {evt} {args}\n')
+                self.debug_log.flush()
+                getattr(self.machine, evt)(*args)
+
+    def pause(self):
+        self._paused = True
+
+    def go(self):
+        self._paused = False
+
+    def run_receiver(self):
+        while self.running:
+            msg = self.dispatcher.recv_message(self.addr)
+            self.event_queue.put(('handle_Message', msg))
+
+    def run_leader_timer(self):
+        self._leader_deadline = 0
+        while self.running:
+            delay = self._leader_deadline - time.monotonic()
+            if delay <= 0:
+                delay = LEADER_TIMEOUT
+                self._leader_deadline = time.monotonic() + delay
+            time.sleep(delay)
+            if time.monotonic() > self._leader_deadline:
+                self.event_queue.put(('handle_LeaderTimeout',))
+
+    def reset_leader_timeout(self):
+        self.debug_log.write(f'{self.addr}: reset_leader_timeout\n')
+        self.debug_log.flush()
+        self._leader_deadline = time.monotonic() + LEADER_TIMEOUT
+
+    def run_election_timer(self):
+        self._election_deadline = 0
+        while self.running:
+            delay = self._election_deadline - time.monotonic()
+            if delay <= 0:
+                self.new_election_deadline()
+            time.sleep(self._election_deadline - time.monotonic())
+            if time.monotonic() > self._election_deadline:
+                self.event_queue.put(('handle_ElectionTimeout',))
+
+    def new_election_deadline(self):
+        new_deadline = time.monotonic() + random.random() * ELECTION_TIMEOUT_SPREAD + ELECTION_TIMEOUT
+        if new_deadline > self._election_deadline:
+            self._election_deadline = new_deadline
+        
+    def reset_election_timer(self):
+        self.debug_log.write(f'{self.addr}: reset_election_timer\n')
+        self.debug_log.flush()
+        self.new_election_deadline()
+
+    # Client function.  Add a new entry to the machine log
+    def append_entry(self, item):
+        self.event_queue.put(('append_new_entry', item))
+
 
 class MockRaftController(RaftController):
     def __init__(self, id, nservers):
@@ -27,10 +126,21 @@ class MockRaftController(RaftController):
     def append_log_entry(self, entry):
         pass
 
-    def get_log_entry(self, index):
-        pass
+def main():
+    from .dispatcher import QueueDispatcher
 
-    def log_size(self):
-        pass
+    NSERVERS = 5
+    dispatch = QueueDispatcher(5)
+    controllers = [ RaftController(i, dispatch, RaftMachine()) 
+                    for i in range(NSERVERS) ]
 
+    for cont in controllers:
+        cont.start()
+
+    return controllers
+    
+if __name__ == '__main__':
+    servers = main()
+
+    
     

@@ -14,7 +14,7 @@ class LogEntry:
         return (self.term, self.entry) == (other.term, other.entry)
 
 class RaftMachine:
-    def __init__(self, control):
+    def __init__(self, control=None):
         self.control = control   # All configuration/system dependent details in control
 
         self.term = 0            # Must be a persistent value (Eventually)
@@ -26,9 +26,6 @@ class RaftMachine:
         # Volatile state (on all servers)
         self.commitIndex = -1     # Highest log entry known to be committed
         self.lastApplied = -1     # Highest log entry applied to state machine
-
-        # There is state that is initialized just on the leader (when becoming leader)
-        self.reset_leader()
 
     # Transactions on the state machine.  These represent actions that need to
     # result in persistent state and logged.
@@ -61,6 +58,7 @@ class RaftMachine:
         if msg.term > self.term:
             self.term = msg.term
             self.state = Follower
+            self.votedFor = None
         getattr(self, f'handle_{type(msg).__name__}')(msg)
 
     # Different message types that could be received
@@ -78,11 +76,19 @@ class RaftMachine:
         if msg.term == self.term:
             self.state.handle_RequestVoteResponse(self, msg)
 
+    # Different timeouts
     def handle_ElectionTimeout(self):
         self.state.handle_ElectionTimeout(self)
 
     def handle_LeaderTimeout(self):
         self.state.handle_LeaderTimeout(self)
+
+    # Function to add a new entry to the log and initiate an AppendEntries
+    def append_new_entry(self, item):
+        e = LogEntry(self.term, item)
+        self.log.append(e)
+        self.send_AppendEntries()
+        self.control.reset_leader_timeout()
 
     def send_AppendEntries(self):
         # Send an AppendEntries message to all peers
@@ -107,11 +113,13 @@ class RaftMachine:
 class RaftState:
     @staticmethod
     def handle_AppendEntries(machine, msg):
-        print('handle_AppendEntries not implemented')
+        pass
+        # print('handle_AppendEntries not implemented')
 
     @staticmethod
     def handle_AppendEntriesResponse(machine, msg):
-        print('handle_AppendEntriesResponse not implemented')
+        pass
+        # print('handle_AppendEntriesResponse not implemented')
 
     @staticmethod
     def handle_RequestVote(machine, msg):
@@ -138,22 +146,23 @@ class RaftState:
 
     @staticmethod
     def handle_RequestVoteResponse(machine, msg):
-        print('handle_RequestVoteResponse not implemented')
+        pass
+        # print('handle_RequestVoteResponse not implemented')
 
     @staticmethod
     def handle_ElectionTimeout(machine):
-        print('handle_ElectionTimeout not implemented')
+        pass
 
     @staticmethod
     def handle_LeaderTimeout(machine):
-        print('handle_LeaderTimeout not implemented')
+        pass
 
 class Follower(RaftState):
     @staticmethod
     def handle_ElectionTimeout(machine):
         machine.state = Candidate
         machine.term += 1
-        machine.votedFor = machine.control.id   # I vote for myself
+        machine.votedFor = machine.control.addr   # I vote for myself
         machine.control.reset_election_timer()
         machine.votesGranted = 1
 
@@ -169,6 +178,7 @@ class Follower(RaftState):
 
     @staticmethod
     def handle_AppendEntries(machine, msg):
+        machine.votedFor = None
         logOk = (msg.prevLogIndex == -1 or (
                      msg.prevLogIndex >= 0 and
                      msg.prevLogIndex < len(machine.log) and
@@ -200,6 +210,7 @@ class Follower(RaftState):
                     matchIndex=msg.prevLogIndex+len(msg.entries)
                     )
                 )
+            machine.control.reset_election_timer()
 
 class Leader(RaftState):
     @staticmethod
@@ -237,6 +248,7 @@ class Candidate(RaftState):
         if msg.voteGranted:
             machine.votesGranted += 1
             if machine.votesGranted > (machine.control.nservers // 2):
+                print(f'Machine {machine.control.addr} became leader')
                 machine.state = Leader
                 machine.reset_leader()
                 # Upon leadership change, send an empty AppendEntries
