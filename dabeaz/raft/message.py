@@ -2,46 +2,49 @@
 #
 # Raft Messages (from pg. 4)
 #
-# Assumptions about the implementation:
+# Some general assumptions and notes:
 #
-# 1. Each server is identified by an integer (0...n-1)
-# 2. Messages encode the source and destination 
+#   1. The source of a message is implicit and filled in by whatever
+#      controller handles the message
 #
+#   2. All message arguments are keyword arguments (better readability)
+#
+#   3. All messages include source, dest, and term.
+
 class RaftMessage:
-    def __init__(self, source, dest):
-        assert (isinstance(source, int) and 
-                isinstance(dest, int) and
-                source != dest)
-              
-        self.source = source
-        self.dest = dest
+    pass
 
 # This is the "Arguments" (from pg. 4 table)
 class AppendEntries(RaftMessage):
-    term = None
-    leaderId = None
-    prevLogIndex = None
-    prevLogTerm = None
-    entries = None
-    leaderCommit = None     # Same as mcommitIndex in TLA+.  Check with
-                            # bullet 5 in paper, "Receiver Implementation"
+    def __init__(self, *, dest, term, prevLogIndex, prevLogTerm, entries, leaderCommit, source=None):
+        self.source = source
+        self.dest = dest
+        self.term = term
+        self.prevLogIndex = prevLogIndex
+        self.prevLogTerm = prevLogTerm
+        self.entries = entries
+        self.leaderCommit = leaderCommit
 
 # This is the "Results" (from pg. 4 table)
 class AppendEntriesResponse(RaftMessage):
-    term = None
-    success = None
-    matchIndex = None   # Used in TLA+ spec.  For what???
+    def __init__(self, *, dest, term, success, matchIndex, source=None):
+        self.source = source
+        self.dest = dest
+        self.term = term
+        self.success = success
+        self.matchIndex = matchIndex
 
 class RequestVote(RaftMessage):
-    def __init__(self, source, dest, term):
-        super().__init__(source, dest)
+    def __init__(self, *, dest, term, lastLogIndex, lastLogTerm, source=None):
+        self.source = source
+        self.dest = dest
         self.term = term
-        # self.candidateId = candidateId   # Not needed (probably)
-        # self.lastLogIndex = lastLogIndex
-        # self.lastLogTerm = lastLogTerm
+        self.lastLogIndex = lastLogIndex
+        self.lastLogTerm = lastLogTerm
 
 class RequestVoteResponse(RaftMessage):
-    def __init__(self, source, dest, term, voteGranted):
-        super().__init__(source, dest)
+    def __init__(self, *, dest, term, voteGranted, source=None):
+        self.source = source
+        self.dest = dest
         self.term = term
         self.voteGranted = voteGranted
