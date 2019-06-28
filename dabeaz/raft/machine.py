@@ -37,9 +37,6 @@ class RaftMachine:
             return False
         self.log[previndex+1:] = entries
         return True
-
-    def update(self, name, value):
-        setattr(self, name, value)
     
     def reset_leader(self):
         # On becoming leader, these values are reset.
@@ -210,7 +207,12 @@ class Follower(RaftState):
                     matchIndex=msg.prevLogIndex+len(msg.entries)
                     )
                 )
+            machine.commitIndex = msg.leaderCommit
+            if machine.lastApplied < machine.commitIndex:
+                machine.control.apply_entries(machine.log[machine.lastApplied+1:machine.commitIndex+1])
+                machine.lastApplied = machine.commitIndex
             machine.control.reset_election_timer()
+            
 
 class Leader(RaftState):
     @staticmethod
@@ -223,7 +225,9 @@ class Leader(RaftState):
             # Check for consensus on log entries
             matches = sorted(machine.matchIndex.values())
             machine.commitIndex = matches[len(machine.matchIndex)//2]
-
+            if machine.lastApplied < machine.commitIndex:
+                machine.control.apply_entries(machine.log[machine.lastApplied+1:machine.commitIndex+1])
+                machine.lastApplied = machine.commitIndex
         else:
             # It failed for this follower.   Immediately retry with a
             # lower nextIndex value

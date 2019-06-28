@@ -6,6 +6,7 @@ import threading
 import socket
 
 from .channel import Channel
+from .config import *
 
 class Dispatcher:
     def send_message(self, msg):
@@ -27,19 +28,10 @@ class QueueDispatcher(Dispatcher):
 
 # A Dispatcher that uses sockets
 
-# Connection endpoints for each server
-CHANNEL_CONFIG = [
-    ('localhost', 19000),
-    ('localhost', 19001),
-    ('localhost', 19002),
-    ('localhost', 19003),
-    ('localhost', 19004)
-]
-
 class ChannelDispatcher(Dispatcher):
     def __init__(self, addr):
         self.addr = addr
-        self.nservers = len(CHANNEL_CONFIG)
+        self.nservers = len(RAFT_SERVER_CONFIG)
         self._recv_queue = queue.Queue()
         self._send_queues = [ queue.Queue() for n in range(self.nservers) ]
 
@@ -59,7 +51,7 @@ class ChannelDispatcher(Dispatcher):
     def raft_server(self):
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, True)
-        sock.bind(CHANNEL_CONFIG[self.addr])
+        sock.bind(RAFT_SERVER_CONFIG[self.addr])
         sock.listen()
         while True:
             client, addr = sock.accept()
@@ -69,8 +61,9 @@ class ChannelDispatcher(Dispatcher):
     def raft_receiver(self, client):
         with client:
             ch = Channel(client)
-            msg = pickle.loads(ch.recv())
-            self._recv_queue.put(msg)
+            while True:
+                msg = pickle.loads(ch.recv())
+                self._recv_queue.put(msg)
 
     # Thread that sends messages to destination server
     def raft_sender(self, addr):
@@ -80,7 +73,7 @@ class ChannelDispatcher(Dispatcher):
             try:
                 if ch is None:
                     sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-                    sock.connect(CHANNEL_CONFIG[addr])
+                    sock.connect(RAFT_SERVER_CONFIG[addr])
                     ch = Channel(sock)
                 ch.send(pickle.dumps(msg))
             except OSError:

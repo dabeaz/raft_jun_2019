@@ -2,21 +2,25 @@
 #
 # The Raft controller
 
-LEADER_TIMEOUT = 1
-ELECTION_TIMEOUT = 3
-ELECTION_TIMEOUT_SPREAD = 0.5
-
 import threading
 import queue
 import time
-from .machine import RaftMachine
 import random
 
-class RaftController:
-    def __init__(self, addr, dispatcher, machine):
+from .machine import RaftMachine
+from .config import *
+
+class RaftControllerBase:
+    def apply_entries(self, entries):
+        pass
+
+class RaftController(RaftControllerBase):
+    def __init__(self, addr, dispatcher, machine, applicator=None):
         self.addr = addr
         self.dispatcher = dispatcher
         self.machine = machine
+        self.applicator = applicator
+
         machine.control = self
 
         self.peers = [ i for i in range(dispatcher.nservers) if i != addr ]
@@ -27,6 +31,12 @@ class RaftController:
 
         # Debug logging
         self.debug_log = open(f'log-{addr}.txt', 'wt')
+
+    def apply_entries(self, entries):
+        self.debug_log.write(f'Applying {entries}\n')
+        self.debug_log.flush()
+        if self.applicator:
+            self.applicator(entries)
 
     # Commands used by the machine
     def send_message(self, msg):
@@ -104,7 +114,7 @@ class RaftController:
         self.event_queue.put(('append_new_entry', item))
 
 
-class MockRaftController(RaftController):
+class MockRaftController(RaftControllerBase):
     def __init__(self, id, nservers):
         self.id = id
         self.nservers = nservers
@@ -128,9 +138,7 @@ class MockRaftController(RaftController):
 
 def main():
     from .dispatcher import QueueDispatcher
-
-    NSERVERS = 5
-    dispatch = QueueDispatcher(5)
+    dispatch = QueueDispatcher(NSERVERS)
     controllers = [ RaftController(i, dispatch, RaftMachine()) 
                     for i in range(NSERVERS) ]
 
